@@ -14,6 +14,23 @@ const STARTUP_TIMEOUT_SECS: u64 = 180;
 #[cfg(unix)]
 const STOP_TIMEOUT_MS: u64 = 2_000;
 
+// Per-request socket timeout. The daemon may still have to run a full
+// decrypt of a large shard (~1.8GB, documented as ~120s in
+// daemon/cache.rs) before it can answer, so the old 120s read timeout
+// made `wx history` fail with an empty stdout and exit code 1 whenever a
+// request landed on that slow path. Raise it well above the worst case;
+// override with WX_CLI_TIMEOUT_SECS if a machine is even slower.
+const REQUEST_TIMEOUT_SECS: u64 = 600;
+
+fn request_timeout() -> Duration {
+    let secs = std::env::var("WX_CLI_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(REQUEST_TIMEOUT_SECS);
+    Duration::from_secs(secs)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PidFile {
     pid: u32,
@@ -446,10 +463,9 @@ fn send_unix(req: Request) -> Result<Response> {
     use std::os::unix::net::UnixStream;
     let sock_path = config::sock_path();
     let mut stream = UnixStream::connect(&sock_path).context("连接 daemon socket 失败")?;
-    stream.set_read_timeout(Some(Duration::from_secs(120))).ok();
-    stream
-        .set_write_timeout(Some(Duration::from_secs(120)))
-        .ok();
+    let t = request_timeout();
+    stream.set_read_timeout(Some(t)).ok();
+    stream.set_write_timeout(Some(t)).ok();
 
     let req_str = serde_json::to_string(&req)? + "\n";
     stream.write_all(req_str.as_bytes())?;
