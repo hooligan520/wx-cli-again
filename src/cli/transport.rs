@@ -7,7 +7,10 @@ use std::time::Duration;
 use crate::config;
 use crate::ipc::{Request, Response};
 
-const STARTUP_TIMEOUT_SECS: u64 = 15;
+// On a cold start the daemon has to decrypt ~20 SQLCipher DBs (message
+// shards alone take 5s+ each). 15s was not enough and every `wx` command
+// failed with "daemon startup timeout"; 180s covers a full cold start.
+const STARTUP_TIMEOUT_SECS: u64 = 180;
 #[cfg(unix)]
 const STOP_TIMEOUT_MS: u64 = 2_000;
 
