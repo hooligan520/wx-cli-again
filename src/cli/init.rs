@@ -61,10 +61,15 @@ pub fn cmd_init(force: bool, hook_seconds: Option<u64>) -> Result<()> {
     println!("数据目录: {}", db_dir.display());
 
     // 读取已有密钥（验证仍有效的保留，避免 force 扫描不全时丢 key）
-    let keys_file_path = config_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join("all_keys.json");
+    //
+    // 写入位置必须与 `config::load_config()` 的读取方式完全一致：优先用 config
+    // 里声明的 `keys_file`（绝对路径直接使用，相对路径以 config 所在目录为基准），
+    // 只有没声明时才回落 `<config 所在目录>/all_keys.json`。
+    // 这里以前是硬编码 `all_keys.json`，于是 config 一旦写了绝对路径，
+    // `wx init` 写的地方和 daemon 读的地方就会静默分叉。
+    let keys_file_rel = config_str(&config_path, "keys_file")
+        .unwrap_or_else(|| "all_keys.json".to_string());
+    let keys_file_path = resolve_keys_path(&config_path, &keys_file_rel);
     let existing_entries = load_existing_entries(&keys_file_path, &db_dir).unwrap_or_default();
     if !existing_entries.is_empty() {
         println!(
@@ -202,6 +207,13 @@ pub fn cmd_init(force: bool, hook_seconds: Option<u64>) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// 读取 config.json 里的字符串字段；文件不存在或字段类型不对都返回 `None`。
+fn config_str(config_path: &Path, key: &str) -> Option<String> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    value.get(key)?.as_str().map(|s| s.to_string())
 }
 
 fn resolve_keys_path(config_path: &Path, keys_file: &str) -> PathBuf {
@@ -385,6 +397,10 @@ fn drop_privileges_if_sudo() -> Result<()> {
 }
 
 fn find_or_create_config_path() -> std::path::PathBuf {
+    // 0) 显式钉死（WX_CLI_CONFIG），此时不存在也写到这里，不做任何探测
+    if let Some(p) = config::config_path_override() {
+        return p;
+    }
     // 如果当前工作目录或可执行文件目录已有 config.json，沿用它（支持便携模式）
     if let Ok(cwd) = std::env::current_dir() {
         let p = cwd.join("config.json");

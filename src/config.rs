@@ -25,6 +25,22 @@ mod recommended_cmd_tests {
     }
 }
 
+/// 显式钉死 config.json 的位置，跳过「cwd → exe 目录 → ~/.wx-cli」的顺序探测。
+///
+/// 为什么需要：默认探测把 **当前工作目录** 排在第一位，且 `keys_file` /
+/// `decrypted_dir` 是相对 config 自身所在目录解析的。所以只要 cwd 里恰好有
+/// 一个同名 `config.json`（比如宿主程序自己的配置文件），`wx init` 就会把
+/// 密钥写进那个目录，而 daemon 从别处启动时读的又是另一份 —— 两份静默分叉。
+/// 设了 `WX_CLI_CONFIG` 就不再有这种可能。
+pub const ENV_CONFIG: &str = "WX_CLI_CONFIG";
+
+/// `WX_CLI_CONFIG` 指定的路径（空值视为未设置，不校验是否存在）。
+pub fn config_path_override() -> Option<PathBuf> {
+    std::env::var_os(ENV_CONFIG)
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub db_dir: PathBuf,
@@ -91,6 +107,14 @@ pub fn load_config() -> Result<Config> {
 }
 
 fn find_config_file() -> Result<PathBuf> {
+    if let Some(p) = config_path_override() {
+        if p.exists() {
+            return Ok(p);
+        }
+        // 显式指定了却不存在 —— 直接报错，不要偷偷回落到别处写另一份。
+        anyhow::bail!("{} 指向的 config.json 不存在: {}", ENV_CONFIG, p.display());
+    }
+
     let cwd_dir = std::env::current_dir().ok();
     let exe_dir = std::env::current_exe()
         .ok()
@@ -437,8 +461,8 @@ fn detect_db_dir_impl() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        config_path_in_dir, default_config_path, find_existing_config_path, home_config_path,
-        resolve_cli_home,
+        config_path_in_dir, config_path_override, default_config_path, find_existing_config_path,
+        home_config_path, resolve_cli_home, ENV_CONFIG,
     };
     #[cfg(target_os = "windows")]
     use super::{known_documents_dir, resolve_windows_data_root};
@@ -459,6 +483,24 @@ mod tests {
         let dir = std::env::temp_dir().join(unique);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn config_path_override_reads_env_and_treats_empty_as_unset() {
+        // 注意：本进程内只有一个测试碰这个变量，测完必须还原，否则会影响
+        // 其它走 find_config_file() 的测试。
+        let prev = std::env::var_os(ENV_CONFIG);
+
+        std::env::set_var(ENV_CONFIG, "/tmp/pinned/config.json");
+        assert_eq!(config_path_override(), Some(PathBuf::from("/tmp/pinned/config.json")));
+
+        std::env::set_var(ENV_CONFIG, "");
+        assert_eq!(config_path_override(), None);
+
+        match prev {
+            Some(v) => std::env::set_var(ENV_CONFIG, v),
+            None => std::env::remove_var(ENV_CONFIG),
+        }
     }
 
     #[test]
