@@ -1,5 +1,6 @@
 pub mod attachments;
 pub mod biz_articles;
+pub mod cache;
 pub mod contacts;
 pub mod daemon_cmd;
 pub mod doctor;
@@ -344,6 +345,11 @@ enum Commands {
         #[arg(long)]
         fix: bool,
     },
+    /// 明文缓存：列出/补齐解密后的分片副本
+    Cache {
+        #[command(subcommand)]
+        action: CacheAction,
+    },
     /// 密钥管理
     Key {
         #[command(subcommand)]
@@ -382,6 +388,28 @@ enum Commands {
     Media {
         #[command(subcommand)]
         action: MediaAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CacheAction {
+    /// 列出每个分片：源大小 / 有无密钥 / 明文是否已落盘
+    List {
+        /// 输出 JSON（默认 YAML 风格表格）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 把缺失的分片解密成明文副本（只补齐，绝不覆盖已有文件）
+    Pull {
+        /// 补齐所有有密钥且缺失的库（默认只补聊天分片 + session + contact）
+        #[arg(long)]
+        all: bool,
+        /// 只补指定分片（相对路径，如 message/message_3.db，可多次指定）
+        #[arg(long = "shard", value_name = "REL")]
+        shards: Vec<String>,
+        /// 输出 JSON（默认文本）
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -637,6 +665,7 @@ fn dispatch(cli: Cli) -> Result<()> {
         } => extract::cmd_extract(attachment_id, output, overwrite, json),
         Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd),
         Commands::Doctor { json, fix } => doctor::cmd_doctor(json, fix),
+        Commands::Cache { action } => cache::cmd_cache(action),
         Commands::Key { action } => match action {
             KeyAction::Extract { hook_seconds } => key_cmd::cmd_key_extract(hook_seconds),
             KeyAction::List { json, show_secrets } => key_cmd::cmd_key_list(json, show_secrets),

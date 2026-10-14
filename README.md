@@ -201,6 +201,34 @@ wx key set message/message_1.db <64hex>   # 手动写入并校验
 补密钥统一用 **`sudo wx key extract --hook-seconds 90`**（不要用裸的 `wx init --force` 当主路径）。  
 取钥**不需要关闭 SIP**；需本机 GUI Terminal +（Hardened Runtime 包）sudo。
 
+### 明文缓存
+
+需要**用别的语言/工具直接对全部消息分片跑 SQL**（跨库聚合、自建索引等）时用它。
+daemon 的明文缓存是内部实现：它首选 `CacheMode::Online`（对加密源库在线打开、
+**不产生明文副本**），只有它自己认为需要的少部分库才落盘，所以不能指望
+`cache/` 里一定有你要的分片。
+
+```bash
+wx cache list                     # 每个分片：源大小 / 有无密钥 / 明文是否已落盘
+wx cache list --json
+wx cache pull                     # 补齐缺失的：聊天分片 + session + contact
+wx cache pull --all               # 补齐所有有密钥且缺失的库（含 fts/media/biz）
+wx cache pull --shard message/message_3.db
+```
+
+落盘位置固定为 `<配置目录>/cache`（默认 `~/.wx-cli/cache`），文件名是
+`md5(相对路径).db` —— 与 daemon 的缓存**同一套命名、同一个目录**，
+所以同一个分片不会出现两份明文。
+
+两条规矩：
+
+- **只补齐，绝不覆盖。** 已存在的文件可能是 daemon 落的，它额外合并了 `-wal`
+  增量，比只解主库文件更全；覆盖它等于静默丢最新消息。要刷新某个分片，
+  先自己删掉那个文件再跑。
+- **不写索引文件。** 存在性即状态：幂等、可重复跑，崩溃也不会留下半截状态。
+
+`--json` 会打印实际写入的路径，方便上层工具直接引用。
+
 ### 消息
 
 ```bash

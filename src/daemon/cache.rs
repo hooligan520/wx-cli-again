@@ -12,6 +12,16 @@ use crate::crypto::sqlcipher;
 use crate::crypto::wal;
 use rusqlite::Connection;
 
+/// 明文副本的文件名：`<md5(rel_key)>.db`。
+///
+/// **命名只在这里定义一次**：daemon 的缓存路径（`DbCache::cache_file_path`）与
+/// `wx cache pull` 的落盘路径都走它。两边各拼一遍 md5 是当初埋下的坑 ——
+/// 改一处漏一处，同一个分片就会冒出两份明文，或者 daemon 认不出 `wx cache`
+/// 落的文件而重复解密。
+pub fn cache_file_name(rel_key: &str) -> String {
+    format!("{:x}.db", md5::compute(rel_key.as_bytes()))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MtimeEntry {
     db_mt: u64,
@@ -347,8 +357,7 @@ impl DbCache {
     }
 
     fn cache_file_path(&self, rel_key: &str) -> PathBuf {
-        let hash = format!("{:x}", md5::compute(rel_key.as_bytes()));
-        self.cache_dir.join(format!("{}.db", hash))
+        self.cache_dir.join(cache_file_name(rel_key))
     }
 
     /// 从持久化文件加载 mtime 记录，复用未过期的解密文件
