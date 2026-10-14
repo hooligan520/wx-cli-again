@@ -109,12 +109,24 @@ cargo build --release
 cp target/release/wx ~/.local/bin/wx
 ```
 
-> ⚠️ 如果你有正在运行的 daemon，**先停掉再覆盖二进制**，否则旧进程仍持有旧文件：
+> ⚠️ **别原地覆盖，换 inode 再放过去。** 如果你有正在运行的 daemon，旧进程仍持有旧文件；
+> 更麻烦的是 **`cp` 覆盖同名文件是原地写（同一 inode）**，macOS 的**代码签名缓存
+> （cdhash）不会失效**，之后这个二进制**每次执行都被内核 `Killed: 9`**
+> （`rc=137` / `SIGKILL`），而且症状很迷惑 —— daemon 还活着、`wx doctor` 之外的
+> 只读缓存类命令看似正常，只有真正走 IPC 的命令才会静默失败。
+>
+> **正确做法**：先停 daemon，再换成新 inode，然后复核哈希：
 > ```bash
-> wx daemon stop        # 失败时用 kill -TERM $(jq -r .pid ~/.wx-cli/daemon.pid)
-> cp target/release/wx ~/.local/bin/wx
+> wx daemon stop            # 报「读取 PID 的 command 失败」时用：
+>                           #   kill -TERM $(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' ~/.wx-cli/daemon.pid)
+> mv ~/.local/bin/wx ~/.local/bin/wx.old-$(date +%Y%m%d)
+> cp target/release/wx ~/.local/bin/wx        # 新 inode ⇒ 签名缓存重新校验
+> sha256sum target/release/wx ~/.local/bin/wx # 两者必须一致
+> rm -f ~/.wx-cli/daemon.sock ~/.wx-cli/daemon.pid
+> wx --version                                # 能打印版本即修好，下次查询自动冷启动 daemon
 > ```
-> 覆盖后用 `sha256sum target/release/wx ~/.local/bin/wx` 复核一致。
+> 判定是不是踩了这个坑：把同一个二进制**换个名字**拷到同目录再跑 ——
+> 新名字能跑、原文件被杀、两者 `md5` 相同 ⇒ 就是 inode 签名缓存问题，不是构建问题。
 
 ### 用 npm 安装（本地打包，可选）
 
@@ -568,12 +580,13 @@ macOS 取钥依赖本机 Terminal 的 `task_for_pid` / 调试能力，**与是�
 | `wx doctor` 报「0 个密钥」/ `读取密钥文件 "..." 失败` | **先 `cd ~/.wx-cli` 再跑**（cwd 抢占了别的 `config.json`，不是提取失败）；脚本里用 `WX_CLI_CONFIG` 钉死 |
 | 某命令卡在整分钟数（如恰好 120.0s）退出、`rc=1`、无输出 | 撞上了 IPC 读超时（`FullDecrypt` 本身要 ~120s）。本 fork 已把默认值改成 600s，可再用 `WX_CLI_TIMEOUT_SECS=900` 覆盖 |
 | daemon 首次启动超时 | 首次要解密 ~20 个 DB。本 fork 已把 `STARTUP_TIMEOUT_SECS` 从 15s 改成 180s |
-| `wx --version` 偏旧 | `git pull && cargo build --release && cp target/release/wx ~/.local/bin/wx`（先 `wx daemon stop`） |
+| `wx --version` 偏旧 | `git pull && cargo build --release`，先 `wx daemon stop`，再 **`mv` 走旧文件 + `cp` 新的**（别原地覆盖，见上文安装章节的 ⚠️） |
 | `wx history` 的条数随分窗粒度变化、偶发整段为 0 | 已知问题：按 `local_id` 去重，而 `local_id` 只在**单库单表内**唯一；需要精确条数时用 `wx cache pull` 落明文后自行统计 |
 | 是否必须关 SIP？ | **否** |
 | 是否必须 ad-hoc 重签微信？ | **默认否**；仅 SSH/无 GUI 且 attach 失败时考虑 |
 | daemon 无响应 | `wx daemon stop` 后任意查询会自动重启。<br>`wx daemon stop` 报「读取 PID 的 command 失败」时，是因为它用 `ps` 校验进程，在受限 shell 里被禁 → 直接 `kill -TERM $(jq -r .pid ~/.wx-cli/daemon.pid)` |
-| 覆盖了二进制但行为没变 | 旧 daemon 进程仍持有旧文件。先 `wx daemon stop` 再覆盖，并用 sha256 复核 |
+| 换了二进制后**任何命令都 `Killed: 9`**（`rc=137`） | ① 旧 daemon 仍持有旧文件；② 更常见的是**原地覆盖**同一 inode，macOS 代码签名缓存不失效 → exec 被内核 SIGKILL。**换 inode**（`mv` 走旧的再 `cp`）+ `kill` daemon + 删 `daemon.{sock,pid}`，然后 `md5` 复核 |
+| 覆盖了二进制但行为没变 | 旧 daemon 进程仍持有旧文件。先 `wx daemon stop` 再**换 inode**，并用 sha256 复核 |
 
 ---
 
