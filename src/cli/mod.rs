@@ -407,6 +407,10 @@ pub enum CacheAction {
         /// 只补指定分片（相对路径，如 message/message_3.db，可多次指定）
         #[arg(long = "shard", value_name = "REL")]
         shards: Vec<String>,
+        /// 强制重解：覆盖已存在的明文。**必须配合 `--shard`**，
+        /// 因为会丢掉 daemon 副本里的 -wal 合并增量。
+        #[arg(long)]
+        refresh: bool,
         /// 输出 JSON（默认文本）
         #[arg(long)]
         json: bool,

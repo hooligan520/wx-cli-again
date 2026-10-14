@@ -214,6 +214,7 @@ wx cache list --json
 wx cache pull                     # 补齐缺失的：聊天分片 + session + contact
 wx cache pull --all               # 补齐所有有密钥且缺失的库（含 fts/media/biz）
 wx cache pull --shard message/message_3.db
+wx cache pull --shard message/message_3.db --refresh   # 强制重解（会覆盖）
 ```
 
 落盘位置固定为 `<配置目录>/cache`（默认 `~/.wx-cli/cache`），文件名是
@@ -223,8 +224,9 @@ wx cache pull --shard message/message_3.db
 两条规矩：
 
 - **只补齐，绝不覆盖。** 已存在的文件可能是 daemon 落的，它额外合并了 `-wal`
-  增量，比只解主库文件更全；覆盖它等于静默丢最新消息。要刷新某个分片，
-  先自己删掉那个文件再跑。
+  增量，比只解主库文件更全；覆盖它等于静默丢最新消息。要强制刷新必须
+  **点名分片**（`--refresh --shard X`）—— 不允许配 `--all` 一把梭，
+  否则一条命令就能把热库的明文降级成无 WAL 版本。
 - **不写索引文件。** 存在性即状态：幂等、可重复跑，崩溃也不会留下半截状态。
 
 `--json` 会打印实际写入的路径，方便上层工具直接引用。

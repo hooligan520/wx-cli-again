@@ -75,8 +75,9 @@ pub fn cmd_cache(action: CacheAction) -> Result<()> {
         CacheAction::Pull {
             all,
             shards,
+            refresh,
             json,
-        } => cmd_pull(all, shards, json),
+        } => cmd_pull(all, shards, refresh, json),
     }
 }
 
@@ -149,7 +150,17 @@ fn cmd_list(json_out: bool) -> Result<()> {
 
 // --------------------------------------------------------------------- pull
 
-fn cmd_pull(all: bool, shards: Vec<String>, json_out: bool) -> Result<()> {
+fn cmd_pull(all: bool, shards: Vec<String>, refresh: bool, json_out: bool) -> Result<()> {
+    // `--refresh` 会覆盖已有明文（丢掉 daemon 的 -wal 合并），所以必须点名分片：
+    // 不允许配 `--all` 一把梭，否则一次命令就能把热库的明文降级成无 WAL 版本。
+    if refresh && shards.is_empty() {
+        anyhow::bail!(
+            "--refresh 必须配合 --shard <REL> 使用。\n\
+             daemon 正在管理的热库（message_0/1/2、session、contact）请交给 daemon 自己刷新；\n\
+             只有确认某个冷分片已经过期、需要强制重解时才点名它。"
+        );
+    }
+
     let (db_dir, keys) = load_state()?;
     let cache_dir = config::cache_dir();
     std::fs::create_dir_all(&cache_dir)
@@ -176,8 +187,9 @@ fn cmd_pull(all: bool, shards: Vec<String>, json_out: bool) -> Result<()> {
     for rel in wanted {
         let plain = cache_file_path(&rel);
 
-        // 规矩 1：已存在就跳过 —— 不覆盖 daemon 那份（带 -wal 合并）
-        if plain.is_file() {
+        // 规矩 1：已存在就跳过 —— 不覆盖 daemon 那份（带 -wal 合并）。
+        // 只有显式 `--refresh --shard X` 才允许点名覆盖。
+        if plain.is_file() && !refresh {
             skipped.push(rel);
             continue;
         }
@@ -257,7 +269,13 @@ fn cmd_pull(all: bool, shards: Vec<String>, json_out: bool) -> Result<()> {
 }
 
 fn round1(v: f64) -> f64 {
-    (v * 10.0).round() / 10.0
+    let r = (v * 10.0).round() / 10.0;
+    // 归一化 -0.0：空集合求和会打印成 "-0.0"，看着像 bug
+    if r == 0.0 {
+        0.0
+    } else {
+        r
+    }
 }
 
 #[cfg(test)]
