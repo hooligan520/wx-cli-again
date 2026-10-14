@@ -2,6 +2,7 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 
 const PLATFORM_PACKAGES = {
   'darwin-arm64': '@jackwener/wx-cli-darwin-arm64',
@@ -12,20 +13,29 @@ const PLATFORM_PACKAGES = {
 };
 
 const platformKey = `${process.platform}-${process.arch}`;
-const pkg = PLATFORM_PACKAGES[platformKey];
+const ext = process.platform === 'win32' ? '.exe' : '';
 
+function chmod755(p) {
+  if (process.platform === 'win32') return;
+  fs.chmodSync(p, 0o755);
+}
+
+// 随包二进制（本地打包）：存在就完事，不需要平台包。
+const bundled = path.join(__dirname, 'bin', 'native', `wx${ext}`);
+if (fs.existsSync(bundled)) {
+  chmod755(bundled);
+  console.log(`wx-cli: using bundled binary ${bundled}`);
+  process.exit(0);
+}
+
+const pkg = PLATFORM_PACKAGES[platformKey];
 if (!pkg) {
   console.log(`wx-cli: no binary for ${platformKey}, skipping`);
   process.exit(0);
 }
 
-const ext = process.platform === 'win32' ? '.exe' : '';
-
 try {
-  const binaryPath = require.resolve(`${pkg}/bin/wx${ext}`);
-  if (process.platform !== 'win32') {
-    fs.chmodSync(binaryPath, 0o755);
-  }
+  chmod755(require.resolve(`${pkg}/bin/wx${ext}`));
 } catch {
   console.log(`wx-cli: platform package ${pkg} not installed`);
 }

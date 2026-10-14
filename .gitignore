@@ -18,6 +18,9 @@ run_hook.bat
 # Rust
 target/
 
+# npm 本地打包产物（由 npm/pack-local.sh 从 target/release/wx 拷入）
+npm/wx-cli/bin/native/
+
 # Python
 __pycache__/
 *.py[cod]
