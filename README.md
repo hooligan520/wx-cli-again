@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#安装)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 
-会话 · 聊天记录 · 搜索 · 联系人 · 群成员 · 群昵称 · 收藏 · 统计 · 导出
+会话 · 聊天记录 · 搜索 · 联系人 · 群成员 · 群昵称 · 收藏 · 统计 · 导出 · 明文缓存
 
 </div>
 
@@ -19,18 +19,45 @@
 通过 [skills CLI](https://github.com/vercel-labs/skills) 一键安装到 Claude Code、Cursor、Codex 等 agent：
 
 ```bash
-npx skills add botiverse/wx-cli
+npx skills add hooligan520/wx-cli-again
 ```
 
 或全局安装：
 
 ```bash
-npx skills add botiverse/wx-cli -g
+npx skills add hooligan520/wx-cli-again -g
 ```
 
-安装后 agent 会自动读取 `SKILL.md`，了解如何安装和调用 wx-cli。
+安装后 agent 会自动读取仓库里的 `SKILL.md`，了解如何安装和调用 wx-cli。
+（跟随上游的话把仓库名换成 `jackwener/wx-cli-again`。）
 
-源码与发布仓库：[botiverse/wx-cli](https://github.com/botiverse/wx-cli)。
+---
+
+## 关于本仓库（fork）
+
+本仓库是 **[jackwener/wx-cli-again](https://github.com/jackwener/wx-cli-again)** 的 fork：
+`origin` = 本仓库，`upstream` = jackwener/wx-cli-again（仅用于同步上游）。
+
+> 上游 `botiverse/wx-cli` 已不存在（历史 README 里的安装链接已失效），
+> 现在可直接 clone **上游或本 fork** 的源码构建，不需要仓库权限。
+
+相对上游，本 fork 只加了 6 个 commit，全部围绕**长跨度/大数据量下的可用性**：
+
+| commit | 内容 |
+|---|---|
+| `ded34a6` | daemon 启动超时 `15s → 180s`。首次要解密 ~20 个 DB，15s 必然超时 |
+| `93e75ee` | 单请求 IPC 读超时 `120s → 600s`。`FullDecrypt` 路径本身就要 ~120s，与 120s 读超时**正面撞车**，症状是命令**恰好卡在 120.0s** 退出、`rc=1`、stdout 为空。可用 `WX_CLI_TIMEOUT_SECS` 覆盖 |
+| `b2604d3` | npm 包支持**随包原生二进制**（`bin/native/wx`），并新增 `npm/pack-local.sh` 一键打包，让 `npm install -g` 能真正装上 fork 的二进制 |
+| `0983381` | `wx init` 认 `config.keys_file`（不再硬编码 `<配置目录>/all_keys.json`）；新增 **`WX_CLI_CONFIG`** 环境变量钉死配置路径 |
+| `345befb` | **新增 `wx cache list` / `wx cache pull`** —— 把任意分片物化成明文，供外部工具直接跑 SQL（见[明文缓存](#明文缓存)） |
+| `d0cb9b1` | `wx cache pull --refresh`，并强制「`--refresh` 必须配 `--shard`」护栏 |
+
+```bash
+git clone https://github.com/hooligan520/wx-cli-again.git
+cd wx-cli-again
+git remote add upstream https://github.com/jackwener/wx-cli-again.git   # 同步上游用
+git fetch upstream && git merge upstream/main                            # 按需
+```
 
 ---
 
@@ -40,31 +67,36 @@ npx skills add botiverse/wx-cli -g
 - **毫秒级响应** — 后台 daemon 持久缓存解密数据库，mtime 不变则复用
 - **AI 友好** — `history` / `search` / `sessions` / `new-messages` / `stats` / `attachments` 默认返回 `{..., meta}` wrapper，agent 能直接消费 freshness / source 信息
 - **完全本地** — 数据不出本机，实时解密，无需全量预解密
+- **按需物化明文** — `wx cache list/pull` 把任意分片落成明文，方便用别的语言直接跑跨库 SQL
 
 ---
 
 ## 安装
 
-> **当前仓库 [botiverse/wx-cli](https://github.com/botiverse/wx-cli) 为 private。**  
-> 匿名 `curl` / 公开 npm 旧包（`@jackwener/wx-cli@0.3.0`）**拿不到**本仓库最新二进制。  
-> 有仓库读权限时，请用下面的 **源码构建**（推荐）。
+> 上游与本 fork **都是公开仓库**，直接 clone 源码构建即可，不需要任何仓库权限。
+> npm 上的 `@jackwener/wx-cli` 只发到 **0.3.0**（早于 0.6.x），公开 registry 拿不到当前版本，
+> 所以**默认不要**用 `npm i -g @jackwener/wx-cli`。
 
 ### 从源码构建（推荐）
 
 ```bash
-git clone git@github.com:botiverse/wx-cli.git && cd wx-cli
+git clone https://github.com/hooligan520/wx-cli-again.git
+cd wx-cli-again
 cargo build --release
+
 # 安装到用户 PATH（覆盖旧版）
 mkdir -p ~/.local/bin
 cp target/release/wx ~/.local/bin/wx
 wx --version   # 应显示当前 Cargo.toml 版本，如 0.6.3
 ```
 
+想跟上游而不是本 fork：把 clone 地址换成 `https://github.com/jackwener/wx-cli-again.git` 即可。
+
 Windows：
 
 ```powershell
-git clone git@github.com:botiverse/wx-cli.git
-cd wx-cli
+git clone https://github.com/hooligan520/wx-cli-again.git
+cd wx-cli-again
 cargo build --release
 # 将 target\release\wx.exe 放到 PATH 目录
 ```
@@ -77,12 +109,36 @@ cargo build --release
 cp target/release/wx ~/.local/bin/wx
 ```
 
+> ⚠️ 如果你有正在运行的 daemon，**先停掉再覆盖二进制**，否则旧进程仍持有旧文件：
+> ```bash
+> wx daemon stop        # 失败时用 kill -TERM $(jq -r .pid ~/.wx-cli/daemon.pid)
+> cp target/release/wx ~/.local/bin/wx
+> ```
+> 覆盖后用 `sha256sum target/release/wx ~/.local/bin/wx` 复核一致。
+
+### 用 npm 安装（本地打包，可选）
+
+若你的机器上 `wx` 是 npm 装的薄壳（`node_modules/@jackwener/wx-cli`），
+可以用本 fork 的脚本把它换成**内置原生二进制**的包：
+
+```bash
+cd wx-cli-again
+./npm/pack-local.sh              # 把 target/release/wx 拷进 npm/wx-cli/bin/native/
+./npm/pack-local.sh --install    # 打包完顺手 npm install -g
+```
+
+脚本会打印二进制 sha256、平台键与版本号，并把各 `package.json` 的版本同步成 `Cargo.toml` 的值。
+装完后 `node_modules/@jackwener/wx-cli/bin/wx.js` 会优先使用随包的
+`bin/native/wx`，而不是去 resolve 尚不存在的 0.6.x 平台包。
+
+若需要指向别处的二进制，可用环境变量兜底：`WX_CLI_BINARY=/path/to/wx wx --version`。
+
 <details>
-<summary>其他方式（需仓库权限 / 发布配置）</summary>
+<summary>其他方式（GitHub Release / 一键脚本）</summary>
 
-**GitHub Release 预编译包**（仓库 private 时仅协作者可见）
+**GitHub Release 预编译包**
 
-从 [Releases](https://github.com/botiverse/wx-cli/releases) 下载：
+从 [Releases](https://github.com/jackwener/wx-cli-again/releases) 下载：
 
 | 平台 | 文件 |
 |------|------|
@@ -96,23 +152,18 @@ cp target/release/wx ~/.local/bin/wx
 chmod +x wx-macos-arm64 && mv wx-macos-arm64 ~/.local/bin/wx
 ```
 
-**一键脚本**（raw 链接在 private 仓库下对匿名用户 404；有权限时可用 `gh` 下载 release asset）
+**用 gh 下载 release asset**
 
 ```bash
-# 需已登录 gh 且对 botiverse/wx-cli 有读权限
-gh release download -R botiverse/wx-cli -p 'wx-macos-arm64' -O ~/.local/bin/wx
+gh release download -R jackwener/wx-cli-again -p 'wx-macos-arm64' -O ~/.local/bin/wx
 chmod +x ~/.local/bin/wx
 ```
 
-`install.sh` / `install.ps1` 仍维护在仓库内，仓库公开或 raw 可访问后可再启用：
+**一键脚本**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/botiverse/wx-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jackwener/wx-cli-again/main/install.sh | bash
 ```
-
-**npm**
-
-历史包名 `@jackwener/wx-cli` 仍存在于 npm，但公开 registry 上的版本可能严重滞后，**不要**当作当前主安装路径。
 
 </details>
 
@@ -217,8 +268,9 @@ wx cache pull --shard message/message_3.db
 wx cache pull --shard message/message_3.db --refresh   # 强制重解（会覆盖）
 ```
 
-落盘位置固定为 `<配置目录>/cache`（默认 `~/.wx-cli/cache`），文件名是
-`md5(相对路径).db` —— 与 daemon 的缓存**同一套命名、同一个目录**，
+落盘位置**硬编码**为 `~/.wx-cli/cache` —— `cache_dir()` = `cli_dir()/cache`，
+而 `cli_dir()` 永远是 `~/.wx-cli`（**与 cwd 无关**，socket / pid / log / cache 都不会漂移）。
+文件名是 `md5(相对路径).db`，与 daemon 的缓存**同一套命名、同一个目录**，
 所以同一个分片不会出现两份明文。
 
 两条规矩：
@@ -399,6 +451,59 @@ wx daemon logs --follow
 
 ---
 
+## 配置与路径
+
+### 配置文件的查找顺序
+
+`config.json` 按 **`WX_CLI_CONFIG` → 当前工作目录（cwd）→ 可执行文件所在目录 → `~/.wx-cli`** 查找，
+命中即用。**配置一旦找到，里面的相对路径都相对 `config.json` 自己所在的目录解析**。
+
+> ⚠️ **cwd 会抢占配置。**如果你在一个恰好放着 `config.json` 的项目目录里执行 `wx`，
+> 它会把这个文件当成自己的配置 —— 典型症状是报
+> `读取密钥文件 "/private/tmp/all_keys.json" 失败`，或者 `wx doctor` 显示「0 个密钥」。
+> 这**不是密钥提取失败**，只是读错了配置文件。排查时先 `cd ~/.wx-cli` 再跑一遍。
+>
+> 反过来说：socket / pid / log / 明文缓存这几样**永远固定在 `~/.wx-cli`**，
+> 与 cwd 无关，所以不用担心它们被抢占。
+
+要用一个完全确定的配置文件（脚本、多账号、容器里都推荐）：
+
+```bash
+WX_CLI_CONFIG=/Users/me/.wx-cli/config.json wx doctor
+```
+
+该文件不存在时会直接报错退出，而**不会**静默回落到别的配置。
+
+### 配置字段
+
+```jsonc
+{
+  "db_dir": ".../xwechat_files/<wxid>/db_storage",  // 加密库根目录
+  "keys_file": "all_keys.json",                     // 相对 config.json 所在目录
+  "decrypted_dir": "cache",                         // ⚠️ 见下方说明
+  "user_nickname": "",
+  "password": "", "password_enabled": false
+}
+```
+
+- **`keys_file`**：密钥文件位置，`wx init` 会写到这里（fork `0983381` 起）。
+  早期版本硬编码成 `<config.json 同目录>/all_keys.json`，配置里写了别的路径也不会生效，
+  会出现「`init` 把密钥写进了没人读的地方」。
+- **`decrypted_dir`**：⚠️ **这个字段目前被解析但没有任何消费方**
+  （`grep '\.decrypted_dir' src/` 无命中），只是历史遗留字段。
+  明文目录实际上由 `cache_dir() = cli_dir()/cache` **硬编码**决定，永远是 `~/.wx-cli/cache`。
+  改了它**不会**改变落盘位置。
+
+### 环境变量
+
+| 变量 | 作用 |
+|---|---|
+| `WX_CLI_CONFIG` | 钉死 `config.json` 路径，跳过全部位置探测（fork `0983381`） |
+| `WX_CLI_TIMEOUT_SECS` | 覆盖单请求 IPC 读超时（默认 600s，fork `93e75ee`） |
+| `WX_CLI_BINARY` | 覆盖 npm 薄壳要执行的二进制路径 |
+
+---
+
 ## 架构
 
 ```
@@ -409,18 +514,25 @@ wx (CLI) ──Unix socket──▶ wx-daemon (后台进程)
            (mtime 感知复用)
 ```
 
-daemon 首次解密后将数据库和 mtime 持久化到 `~/.wx-cli/cache/`。重启后 mtime 未变则直接复用，无需重解密。
+daemon **优先用 `CacheMode::Online`** —— 对加密源库做 SQLCipher 在线打开，
+**不产生明文副本**；只有它自己认为需要的那部分库才 `FullDecrypt` 落盘到
+`~/.wx-cli/cache/`（所以 `cache/` 里**不一定**有你要的分片，缺的用 `wx cache pull` 补）。
+落盘的库按 mtime / WAL 增量更新，重启后 mtime 未变则直接复用。
 
 ```
-~/.wx-cli/
-├── config.json       # 配置
-├── all_keys.json     # 数据库密钥
-├── daemon.sock       # Unix socket
-├── daemon.pid / .log
-└── cache/
-    ├── _mtimes.json  # mtime 索引
-    └── *.db          # 解密后的数据库
+~/.wx-cli/                 # = cli_dir()，永远在这里，与 cwd 无关
+├── config.json            # 配置（可用 WX_CLI_CONFIG 指向别处）
+├── all_keys.json          # 数据库密钥（路径由 config.keys_file 决定）
+├── daemon.sock            # Unix socket
+├── daemon.pid / daemon.log
+├── shard-meta.json        # 分片跳跃优化用的 per-talker 时间边界
+└── cache/                 # 唯一的明文目录（cache_dir() 硬编码 = cli_dir()/cache）
+    ├── _mtimes.json       # mtime 索引
+    └── <md5(相对路径)>.db  # 解密后的数据库，daemon 与 `wx cache pull` 共写此处
 ```
+
+同一个分片在 `cache/` 里只有一个副本：daemon 与 `wx cache pull` 用的是
+**同一个命名函数、同一个目录**，而 `wx cache pull` 默认只补缺失、不覆盖。
 
 ---
 
@@ -428,7 +540,18 @@ daemon 首次解密后将数据库和 mtime 持久化到 `~/.wx-cli/cache/`。�
 
 微信 4.x 使用 SQLCipher 4 加密本地数据库（AES-256-CBC + HMAC-SHA512，页级 raw key）。每个 DB 有独立的 32-byte AES key；密钥在微信进程打开 DB 时出现在内存中。
 
-- **首次**：`sudo wx init` — 内存扫描（`x'key+salt'` + salt 邻接）+ 可选 LLDB hook，写入 `~/.wx-cli/all_keys.json`
+⚠️ 微信用的是**非标准页布局**：`PAGE_SZ = 4096`、`SALT_SZ = 16`、**`RESERVE_SZ = 80`**
+（尾部 = IV 16 + HMAC 64），而**不是标准 SQLCipher 的 16**。自行解析时若按标准取
+「页面最后 16 字节」当 IV，**页 1 的头永远对不上**，很容易把结论误导成「密钥错了」。
+参数在 `src/crypto/mod.rs`。页 1 的结构是：`iv = page[4016:4032]`、
+密文 `page[16:4016]`，解密结果从逻辑偏移 16 起落，`"SQLite format 3\0"` 明文头需要自己合成；
+其余页密文是 `page[0:4016]`，尾部 80 字节丢弃。
+
+验钥推荐用**页 1 的 HMAC-SHA512**（`mac_salt = salt ^ 0x3a`，
+`mac_key = pbkdf2_hmac('sha512', key, mac_salt, 2, 32)`，覆盖 `密文 || iv || 页码`），
+比「解密后看文件头」可靠得多。
+
+- **首次**：`sudo wx init` — 内存扫描（`x'key+salt'` + salt 邻接）+ 可选 LLDB hook，写入 `config.keys_file`
 - **补齐 / 新分片**：`sudo wx key extract --hook-seconds 90`（与 `init --force` 等价，是产品推荐命令）
 
 之后 daemon **优先 SQLCipher 在线打开**加密库（无需全量预解密）；必要时才解密到 `~/.wx-cli/cache/` 并按 mtime / WAL 增量更新。
@@ -442,10 +565,15 @@ macOS 取钥依赖本机 Terminal 的 `task_for_pid` / 调试能力，**与是�
 | 问题 | 处理 |
 |------|------|
 | `meta.unknown_shards` / doctor 缺关键分片 | `sudo wx key extract --hook-seconds 90`，等待时打开相关聊天 |
-| `wx --version` 偏旧 | `git pull && cargo build --release && cp target/release/wx ~/.local/bin/wx` |
+| `wx doctor` 报「0 个密钥」/ `读取密钥文件 "..." 失败` | **先 `cd ~/.wx-cli` 再跑**（cwd 抢占了别的 `config.json`，不是提取失败）；脚本里用 `WX_CLI_CONFIG` 钉死 |
+| 某命令卡在整分钟数（如恰好 120.0s）退出、`rc=1`、无输出 | 撞上了 IPC 读超时（`FullDecrypt` 本身要 ~120s）。本 fork 已把默认值改成 600s，可再用 `WX_CLI_TIMEOUT_SECS=900` 覆盖 |
+| daemon 首次启动超时 | 首次要解密 ~20 个 DB。本 fork 已把 `STARTUP_TIMEOUT_SECS` 从 15s 改成 180s |
+| `wx --version` 偏旧 | `git pull && cargo build --release && cp target/release/wx ~/.local/bin/wx`（先 `wx daemon stop`） |
+| `wx history` 的条数随分窗粒度变化、偶发整段为 0 | 已知问题：按 `local_id` 去重，而 `local_id` 只在**单库单表内**唯一；需要精确条数时用 `wx cache pull` 落明文后自行统计 |
 | 是否必须关 SIP？ | **否** |
 | 是否必须 ad-hoc 重签微信？ | **默认否**；仅 SSH/无 GUI 且 attach 失败时考虑 |
-| daemon 无响应 | `wx daemon stop` 后任意查询会自动重启 |
+| daemon 无响应 | `wx daemon stop` 后任意查询会自动重启。<br>`wx daemon stop` 报「读取 PID 的 command 失败」时，是因为它用 `ps` 校验进程，在受限 shell 里被禁 → 直接 `kill -TERM $(jq -r .pid ~/.wx-cli/daemon.pid)` |
+| 覆盖了二进制但行为没变 | 旧 daemon 进程仍持有旧文件。先 `wx daemon stop` 再覆盖，并用 sha256 复核 |
 
 ---
 
